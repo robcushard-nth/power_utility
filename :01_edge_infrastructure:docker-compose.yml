@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # 1. The Brain (LLM Engine) - Designed for NVIDIA Jetson/DGX
+  ollama:
+    image: ollama/ollama:latest
+    container_name: utility_brain
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_storage:/root/.ollama
+    restart: unless-stopped
+    # Uncomment for NVIDIA GPU Passthrough
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # 2. The Memory (Vector Database)
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: utility_memory
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+
+  # 3. The Nervous System (Workflow Automation)
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: utility_agent
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_SECURE_COOKIE=false
+    volumes:
+      - n8n_storage:/home/node/.n8n
+    restart: unless-stopped
+
+volumes:
+  ollama_storage:
+  qdrant_storage:
+  n8n_storage:
