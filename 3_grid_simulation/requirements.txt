@@ -3,3 +3,4 @@ simpy
 pandas
 matplotlib
 seaborn
+numpy
