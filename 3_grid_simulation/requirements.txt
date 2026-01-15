@@ -1,3 +1,5 @@
 streamlit
 simpy
 pandas
+matplotlib
+seaborn

@@ -3,94 +3,165 @@ import simpy
 import random
 import pandas as pd
 import statistics
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="Utility Storm Response Twin", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Utility Risk Simulator (Monte Carlo)", page_icon="⚡", layout="wide")
 
-st.title("⚡ Utility Storm Response Digital Twin")
+# --- CUSTOM CSS ---
 st.markdown("""
-**Operational Simulation:** Adjust crew resources and storm severity to see the impact on 
-**Mean Time to Restoration (MTTR)** and **Customer Wait Times**.
+<style>
+    div[data-testid="stMetricValue"] { font-size: 24px; }
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("⚡ Utility Risk Simulator (Monte Carlo)")
+st.markdown("""
+**Risk Analysis:** Run thousands of "virtual storms" to determine the probability of failure.
 """)
 
-# --- SIDEBAR INPUTS ---
+# --- SIDEBAR CONFIGURATION ---
 with st.sidebar:
-    st.header("Simulation Parameters")
+    st.header("1. Monte Carlo Settings")
+    iterations = st.slider("Simulation Runs", 10, 500, 100)
     
-    num_crews = st.slider("Number of Repair Crews", min_value=1, max_value=50, value=5)
-    storm_severity = st.slider("Storm Severity (Total Outages)", min_value=5, max_value=100, value=20)
+    st.divider()
     
-    st.subheader("Operational Constraints")
-    avg_travel = st.slider("Avg Travel Time (min)", 10, 120, 30)
-    avg_repair = st.slider("Avg Repair Time (min)", 30, 240, 120)
+    st.header("2. Resource Strategy")
+    num_crews = st.slider("Repair Crews", 1, 50, 8)
+    crew_rate = st.number_input("Crew Hourly Rate ($)", 350, step=50)
     
-    run_btn = st.button("Run Simulation", type="primary")
+    st.header("3. Storm Profile")
+    storm_severity = st.slider("Total Outages", 5, 200, 40)
+    customers_per_outage = st.slider("Avg Customers/Outage", 10, 500, 125)
+    total_customers = st.number_input("Total Grid Customers", 50000)
+
+    st.header("4. Constraints")
+    avg_travel = st.slider("Travel Time (min)", 10, 120, 30)
+    avg_repair = st.slider("Repair Time (min)", 30, 240, 120)
+    variability = st.slider("Uncertainty (Std Dev)", 1, 30, 15)
+    
+    run_btn = st.button("Run Monte Carlo Simulation", type="primary", use_container_width=True)
 
 # --- SIMULATION ENGINE ---
 class GridRestoration:
-    def __init__(self, env, num_crews, travel_time, repair_time):
+    def __init__(self, env, num_crews, travel, repair, var):
         self.env = env
         self.crews = simpy.Resource(env, capacity=num_crews)
-        self.travel_time = travel_time
-        self.repair_time = repair_time
+        self.travel_base = travel
+        self.repair_base = repair
+        self.var = var
         self.logs = []
-        self.active_outages = 0
-        self.outage_history = [] 
 
-    def repair_outage(self, outage_id):
-        arrival_time = self.env.now
-        self.active_outages += 1
-        self.outage_history.append({"time": self.env.now, "active": self.active_outages})
-
-        with self.crews.request() as request:
-            yield request
-            wait_time = self.env.now - arrival_time
+    def repair_outage(self, outage_id, cust_impact):
+        arrival = self.env.now
+        with self.crews.request() as req:
+            yield req
+            dispatch_wait = self.env.now - arrival
             
-            # Simulate Travel & Repair
-            travel = random.gauss(self.travel_time, 5) 
-            yield self.env.timeout(travel)
+            # Stochastic Process
+            travel = max(5, random.gauss(self.travel_base, self.var))
+            repair = max(10, random.gauss(self.repair_base, self.var * 2))
             
-            repair = random.expovariate(1.0 / self.repair_time)
-            yield self.env.timeout(repair)
-            
-            self.active_outages -= 1
-            self.outage_history.append({"time": self.env.now, "active": self.active_outages})
+            total_dur = dispatch_wait + travel + repair
             
             self.logs.append({
                 "Outage ID": outage_id,
-                "Report Time": arrival_time,
-                "Customer Wait (Min)": wait_time + travel + repair,
-                "Crew Wait Time": wait_time,
-                "Travel Time": travel,
-                "Repair Time": repair
+                "Customers": cust_impact,
+                "Total Duration": total_dur,
+                "Wait Time": dispatch_wait,
+                "Cost": ((travel + repair)/60) * crew_rate
             })
 
-def outage_generator(env, grid, severity):
-    for i in range(severity):
-        yield env.timeout(random.uniform(0, 600))
-        env.process(grid.repair_outage(i))
-
-# --- MAIN EXECUTION ---
-if run_btn:
+def run_single_iteration(run_id):
     env = simpy.Environment()
-    grid = GridRestoration(env, num_crews, avg_travel, avg_repair)
-    env.process(outage_generator(env, grid, storm_severity))
-    with st.spinner('Simulating storm response logistics...'):
-        env.run()
+    grid = GridRestoration(env, num_crews, avg_travel, avg_repair, variability)
+    
+    for i in range(storm_severity):
+        env.process(grid.repair_outage(i, int(random.uniform(customers_per_outage*0.7, customers_per_outage*1.3))))
+        
+    env.run()
     
     if grid.logs:
         df = pd.DataFrame(grid.logs)
+        df["Run ID"] = run_id
+        return df
+    return pd.DataFrame()
+
+# --- MAIN EXECUTION ---
+if run_btn:
+    all_runs = []
+    progress_bar = st.progress(0)
+    
+    # MONTE CARLO LOOP
+    for i in range(iterations):
+        run_df = run_single_iteration(i + 1)
+        all_runs.append(run_df)
+        progress_bar.progress((i + 1) / iterations)
+    
+    master_df = pd.concat(all_runs)
+    
+    # --- CALCULATE AGGREGATE METRICS PER RUN ---
+    run_metrics = master_df.groupby("Run ID").apply(lambda x: pd.Series({
+        "CAIDI": (x["Total Duration"] * x["Customers"]).sum() / x["Customers"].sum(),
+        "SAIDI": (x["Total Duration"] * x["Customers"]).sum() / total_customers,
+        "Total Cost": x["Cost"].sum(),
+        "Max Wait": x["Total Duration"].max()
+    }))
+
+    # --- TABS LAYOUT ---
+    tab1, tab2 = st.tabs(["📊 Executive Summary", "🎲 Risk & Probability Analysis"])
+
+    # === TAB 1: AVERAGES ===
+    with tab1:
+        st.subheader(f"Expected Outcomes (Based on {iterations} Simulations)")
+        
+        # Means
+        avg_caidi = run_metrics["CAIDI"].mean()
+        avg_saidi = run_metrics["SAIDI"].mean()
+        avg_cost = run_metrics["Total Cost"].mean()
+        
+        # 95th Percentile (Value at Risk)
+        var_caidi = np.percentile(run_metrics["CAIDI"], 95)
+        var_cost = np.percentile(run_metrics["Total Cost"], 95)
+        
         col1, col2, col3 = st.columns(3)
-        col1.metric("Avg Restoration Time (MTTR)", f"{df['Customer Wait (Min)'].mean():.0f} min")
-        col2.metric("Longest Outage", f"{df['Customer Wait (Min)'].max():.0f} min")
-        col3.metric("Crew Utilization", f"{(df['Repair Time'].sum() + df['Travel Time'].sum()) / (env.now * num_crews) * 100:.1f}%")
+        col1.metric("Avg CAIDI", f"{avg_caidi:.0f} min", f"95% Risk: {var_caidi:.0f} min", delta_color="inverse")
+        col2.metric("Avg SAIDI", f"{avg_saidi:.2f} min")
+        col3.metric("Avg Event Cost", f"${avg_cost:,.0f}", f"95% Risk: ${var_cost:,.0f}", delta_color="inverse")
         
-        st.subheader("Storm Recovery Curve")
-        st.line_chart(pd.DataFrame(grid.outage_history).set_index("time"))
+        st.divider()
         
-        st.subheader("Detailed Restoration Log")
-        st.dataframe(df.sort_values("Report Time"), use_container_width=True)
-    else:
-        st.warning("No outages generated.")
-else:
-    st.info("Adjust parameters in the sidebar and click 'Run Simulation' to start.")
+        # VISUAL 1: Cost vs Reliability Scatter
+        st.markdown("#### Cost vs. Reliability Trade-off")
+        st.markdown("Are we spending efficiently? Ideal scenario is **Bottom-Left** (Low Cost, Low CAIDI).")
+        
+        fig, ax = plt.subplots(figsize=(10, 5))
+        sns.scatterplot(data=run_metrics, x="Total Cost", y="CAIDI", alpha=0.6, color="blue", s=80, ax=ax)
+        
+        # Add Reference Lines (Averages)
+        plt.axvline(avg_cost, color='red', linestyle='--', alpha=0.5, label='Avg Cost')
+        plt.axhline(avg_caidi, color='red', linestyle='--', alpha=0.5, label='Avg CAIDI')
+        plt.title("Each dot represents one full storm simulation")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        st.pyplot(fig)
+
+    # === TAB 2: PROBABILITY & RISK ===
+    with tab2:
+        st.subheader("Probability of Failure")
+        
+        c1, c2 = st.columns(2)
+        
+        # VISUAL 2: Exceedance Probability (Inverse CDF)
+        with c1:
+            st.markdown("##### 📉 Likelihood of Delays (Exceedance Curve)")
+            st.caption("What is the % chance that restoration takes longer than X minutes?")
+            
+            # Sort data
+            sorted_caidi = np.sort(run_metrics["CAIDI"])
+            # Calculate probability of exceeding (1 - CDF)
+            y_vals = 1.0 - np.arange
