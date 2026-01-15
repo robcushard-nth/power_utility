@@ -164,4 +164,48 @@ if run_btn:
             # Sort data
             sorted_caidi = np.sort(run_metrics["CAIDI"])
             # Calculate probability of exceeding (1 - CDF)
-            y_vals = 1.0 - np.arange
+            y_vals = 1.0 - np.arange(1, len(sorted_caidi) + 1) / len(sorted_caidi)
+            
+            fig2, ax2 = plt.subplots()
+            ax2.plot(sorted_caidi, y_vals, marker='.', linestyle='none', color='purple')
+            ax2.fill_between(sorted_caidi, y_vals, alpha=0.1, color='purple')
+            ax2.set_xlabel("CAIDI (Minutes)")
+            ax2.set_ylabel("Probability of Exceeding")
+            ax2.grid(True, alpha=0.3)
+            st.pyplot(fig2)
+
+        # VISUAL 3: Histogram with Risk Zones
+        with c2:
+            st.markdown("##### 📊 Cost Distribution & Risk Tail")
+            st.caption("How often do we blow the budget?")
+            
+            fig3, ax3 = plt.subplots()
+            sns.histplot(run_metrics["Total Cost"], kde=True, ax=ax3, color="green", bins=15)
+            
+            # Highlight 95th Percentile
+            ax3.axvline(var_cost, color='red', linestyle='-', linewidth=2)
+            ax3.text(var_cost, ax3.get_ylim()[1]*0.9, f' 95% Risk\n ${var_cost:,.0f}', color='red')
+            
+            st.pyplot(fig3)
+        
+        st.divider()
+        
+        # VISUAL 4: "Black Swan" Analysis
+        st.markdown("#### 🚨 'Black Swan' Analysis (Worst Case Scenario)")
+        st.markdown("Below are details from the **single worst simulation run** out of the batch.")
+        
+        # Find the run with the highest CAIDI
+        worst_run_id = run_metrics["CAIDI"].idxmax()
+        worst_run_data = master_df[master_df["Run ID"] == worst_run_id]
+        
+        w1, w2, w3 = st.columns(3)
+        w1.error(f"Worst Run ID: #{worst_run_id}")
+        w2.metric("Worst Case CAIDI", f"{run_metrics.loc[worst_run_id, 'CAIDI']:.0f} min")
+        w3.metric("Worst Case Cost", f"${run_metrics.loc[worst_run_id, 'Total Cost']:,.0f}")
+        
+        # Show timeline of that disaster
+        st.bar_chart(worst_run_data.set_index("Outage ID")["Total Duration"])
+        st.caption(f"Timeline of Outages during Run #{worst_run_id}")
+
+else:
+    st.info("👈 Set iterations and click 'Run Monte Carlo Simulation' to calculate risk.")
