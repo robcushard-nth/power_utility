@@ -8,6 +8,9 @@
 
 ---
 
+> **Update 2026-10-02:** A Change Event Capacity Simulator (`3_grid_simulation/change_event_sim.py`, NiceGUI app `change_event_app.py`, event-log intake, synthetic data, `tests/`) was added beside the storm simulator per `BRIEF_transfer_crew_sim.md` v2. Requirements are now pinned. The sections below describe the repo as of 2026-09-18 and have not been regenerated.
+
+
 ## 1. Executive Summary
 
 A three-part proof of concept demonstrating the NTH full-stack pattern for utility operations: sovereign edge AI infrastructure, a safety-first RAG copilot for field technicians, and a discrete event simulation of storm restoration logistics. The centerpiece is a Streamlit Monte Carlo simulator that runs up to 500 virtual storms and reports CAIDI, SAIDI, restoration cost, 95th-percentile value-at-risk, and a worst-case "black swan" run — the reliability metrics utility executives are actually graded on.

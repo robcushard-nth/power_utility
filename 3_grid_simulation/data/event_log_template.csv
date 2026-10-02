@@ -1,0 +1,6 @@
+site_id,site_class,visit_n,event_time,event,note
+S001,standard,1,2026-01-05T17:05:00,depart,field engineer leaves base
+S001,standard,1,2026-01-05T18:10:00,check_in,"ops center called, building A"
+S001,standard,1,2026-01-05T18:10:00,gate_start,
+S001,standard,1,2026-01-05T19:20:00,gate_end,
+S001,standard,1,2026-01-05T19:35:00,device_done,first device
